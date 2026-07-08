@@ -1,0 +1,16 @@
+{
+  "name": "kimiusage",
+  "version": "0.1.0",
+  "description": "Local usage reports for Kimi Code sessions",
+  "type": "module",
+  "bin": {
+    "kimiusage": "./bin/kimiusage.js"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

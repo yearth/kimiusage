@@ -127,6 +127,16 @@ test('summarizes daily, monthly, and session usage', async () => {
       cacheReadTokens: 33,
       cacheCreationTokens: 44,
       totalTokens: 209,
+      modelBreakdowns: [
+        {
+          model: 'kimi-k2',
+          inputTokens: 110,
+          outputTokens: 22,
+          cacheReadTokens: 33,
+          cacheCreationTokens: 44,
+          totalTokens: 209,
+        },
+      ],
     },
     {
       key: '2026-01-03',
@@ -137,6 +147,16 @@ test('summarizes daily, monthly, and session usage', async () => {
       cacheReadTokens: 9,
       cacheCreationTokens: 10,
       totalTokens: 34,
+      modelBreakdowns: [
+        {
+          model: 'unknown',
+          inputTokens: 7,
+          outputTokens: 8,
+          cacheReadTokens: 9,
+          cacheCreationTokens: 10,
+          totalTokens: 34,
+        },
+      ],
     },
   ]);
 

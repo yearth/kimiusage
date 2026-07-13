@@ -1,4 +1,5 @@
 node_modules/
 coverage/
 .worktrees/
+docs/superpowers/
 .DS_Store

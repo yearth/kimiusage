@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { runCli } from '../src/cli.js';
+import { parseArgs, runCli } from '../src/cli.js';
+import { applyConfig, loadConfig } from '../src/config.js';
 import { summarizeDaily } from '../src/summary.js';
 import { renderTable } from '../src/render.js';
 
@@ -119,6 +120,27 @@ test('CLI applies configuration file defaults and command overrides', async () =
       { key: '2026-01-12', totalTokens: 10 },
     ],
   );
+});
+
+test('configuration validates and exposes pricing overrides', async () => {
+  const root = await makeFixture();
+  const configPath = join(root, 'pricing.json');
+  const pricing = {
+    'mcli/glm-5.2': {
+      input: 1,
+      output: 2,
+      cacheRead: 0.1,
+      cacheCreation: 1.25,
+    },
+  };
+  await writeFile(configPath, JSON.stringify({ pricing }));
+
+  const options = applyConfig(parseArgs(['daily']), await loadConfig(configPath));
+
+  assert.deepEqual(options.pricing, pricing);
+
+  await writeFile(configPath, JSON.stringify({ pricing: { broken: { input: -1 } } }));
+  await assert.rejects(() => loadConfig(configPath), /Invalid pricing for broken: input/);
 });
 
 async function makeFixture() {

@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { validatePricingConfig } from './pricing.js';
+
 export async function loadConfig(path, env = process.env) {
   const configPath = path ?? await discoverConfig(env);
   if (!configPath) return {};
@@ -10,6 +12,7 @@ export async function loadConfig(path, env = process.env) {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`Invalid config file: ${configPath}`);
   }
+  parsed.pricing = validatePricingConfig(parsed.pricing);
   return parsed;
 }
 
@@ -34,7 +37,10 @@ export async function discoverConfig(env = process.env) {
 
 export function applyConfig(options, config) {
   const commandConfig = config.commands?.[options.command] ?? {};
-  return mergeOptions(mergeOptions(options, config.defaults ?? {}), commandConfig);
+  return {
+    ...mergeOptions(mergeOptions(options, config.defaults ?? {}), commandConfig),
+    pricing: config.pricing ?? {},
+  };
 }
 
 function mergeOptions(base, overrides) {

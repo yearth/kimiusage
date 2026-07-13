@@ -9,23 +9,36 @@ import {
 } from './summary.js';
 import { renderJson, renderTable } from './render.js';
 import { applyConfig, loadConfig } from './config.js';
+import { priceRecord } from './pricing.js';
 
 export async function runCli(argv = process.argv.slice(2), env = process.env) {
   const parsedOptions = parseArgs(argv);
   const options = applyConfig(parsedOptions, await loadConfig(parsedOptions.configPath, env));
   if (options.help) {
-    return usage();
+    return { stdout: usage(), stderr: '' };
   }
 
   const dataDirs = options.dataDirs.length > 0 ? options.dataDirs : defaultDataDirs(env);
   const files = await discoverWireFiles(dataDirs);
-  const { records: loadedRecords } = await loadUsageRecords(files);
-  const records = filterRecords(loadedRecords, options);
+  const { records: loadedRecords, diagnostics } = await loadUsageRecords(files);
+  const pricedRecords = loadedRecords.map((record) => ({
+    ...record,
+    cost: options.costEnabled ? priceRecord(record, options.pricing) : null,
+  }));
+  const records = filterRecords(pricedRecords, options);
   const rows = summarize(options.command, records, options);
+  const context = {
+    command: options.command,
+    timezone: options.timeZone,
+    costEnabled: options.costEnabled,
+  };
   const output = options.json
-    ? renderJson(rows)
+    ? renderJson(rows, context)
     : renderTable(rows, labelFor(options.command), options);
-  return `${output}\n`;
+  return {
+    stdout: `${output}\n`,
+    stderr: renderDiagnostics(diagnostics, rows, options),
+  };
 }
 
 export function parseArgs(argv) {
@@ -39,6 +52,8 @@ export function parseArgs(argv) {
     startOfWeek: 'sunday',
     compact: false,
     breakdown: false,
+    costEnabled: true,
+    pricing: {},
     configPath: null,
     help: false,
   };
@@ -79,8 +94,10 @@ export function parseArgs(argv) {
       options.configPath = requireValue(args, ++index, arg);
     } else if (arg === '--data-dir') {
       options.dataDirs.push(...requireValue(args, ++index, arg).split(',').filter(Boolean));
-    } else if (arg === '--no-cost' || arg === '--offline') {
-      // Accepted for MVP compatibility; cost estimation is not implemented yet.
+    } else if (arg === '--no-cost') {
+      options.costEnabled = false;
+    } else if (arg === '--offline') {
+      // Accepted for compatibility. kimiusage never makes network requests.
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
@@ -92,7 +109,7 @@ export function parseArgs(argv) {
 function summarize(command, records, options) {
   if (command === 'weekly') return summarizeWeekly(records, options);
   if (command === 'monthly') return summarizeMonthly(records, options);
-  if (command === 'session') return summarizeSessions(records);
+  if (command === 'session') return summarizeSessions(records, options);
   return summarizeDaily(records, options);
 }
 
@@ -127,8 +144,22 @@ Options:
   --json                  Print JSON
   --breakdown             Show per-model breakdown rows
   --compact               Use a compact table layout
-  --no-cost               Accepted for compatibility; cost is not implemented
-  --offline               Accepted for compatibility; no network is used
+  --no-cost               Disable estimated cost calculation
+  --offline               Accepted for compatibility; kimiusage is always offline
   -h, --help              Show this help
 `;
+}
+
+function renderDiagnostics(diagnostics, rows, options) {
+  const lines = diagnostics.map((item) => `Failed to read ${item.file}: ${item.message}`);
+  if (options.costEnabled) {
+    const missing = new Set();
+    for (const row of rows) {
+      for (const model of row.missingPricingModels) missing.add(model);
+    }
+    if (missing.size > 0) {
+      lines.push(`Missing pricing: ${Array.from(missing).sort().join(', ')}`);
+    }
+  }
+  return lines.length > 0 ? `${lines.join('\n')}\n` : '';
 }

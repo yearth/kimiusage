@@ -44,11 +44,11 @@ const records = [
 
 test('CLI summarizes usage by configurable week start', async () => {
   const root = await makeFixture();
-  const output = await runCli(
+  const result = await runCli(
     ['weekly', '--json', '--data-dir', join(root, '.kimi-code'), '--start-of-week', 'monday'],
     { HOME: root },
   );
-  const report = JSON.parse(output);
+  const report = JSON.parse(result.stdout);
 
   assert.deepEqual(
     report.rows.map((row) => ({ key: row.key, totalTokens: row.totalTokens })),
@@ -116,8 +116,8 @@ test('CLI applies configuration file defaults and command overrides', async () =
     }),
   );
 
-  const output = await runCli(['weekly', '--config', configPath], { HOME: root });
-  const report = JSON.parse(output);
+  const result = await runCli(['weekly', '--config', configPath], { HOME: root });
+  const report = JSON.parse(result.stdout);
 
   assert.deepEqual(
     report.rows.map((row) => ({ key: row.key, totalTokens: row.totalTokens })),
@@ -149,7 +149,49 @@ test('configuration validates and exposes pricing overrides', async () => {
   await assert.rejects(() => loadConfig(configPath), /Invalid pricing for broken: input/);
 });
 
-async function makeFixture() {
+test('CLI exposes a stable JSON contract and missing pricing diagnostics', async () => {
+  const root = await makeFixture('mcli/glm-5.2');
+
+  const result = await runCli(
+    ['daily', '--json', '--data-dir', join(root, '.kimi-code')],
+    { HOME: root },
+  );
+  const report = JSON.parse(result.stdout);
+
+  assert.equal(report.command, 'daily');
+  assert.equal(report.timezone, 'UTC');
+  assert.equal(report.costCalculation, 'enabled');
+  assert.equal(report.rows[0].costUsd, null);
+  assert.equal(report.totals.costUsd, null);
+  assert.deepEqual(report.missingPricingModels, ['mcli/glm-5.2']);
+  assert.match(result.stderr, /Missing pricing: mcli\/glm-5\.2/);
+});
+
+test('CLI disables pricing cleanly with --no-cost', async () => {
+  const root = await makeFixture('mcli/glm-5.2');
+
+  const result = await runCli(
+    ['daily', '--json', '--no-cost', '--data-dir', join(root, '.kimi-code')],
+    { HOME: root },
+  );
+  const report = JSON.parse(result.stdout);
+
+  assert.equal(report.costCalculation, 'disabled');
+  assert.equal(report.rows[0].costUsd, null);
+  assert.equal(report.totals.costUsd, null);
+  assert.deepEqual(report.missingPricingModels, []);
+  assert.equal(result.stderr, '');
+});
+
+test('table shows Cost and N/A for incomplete pricing', () => {
+  const rows = summarizeDaily(records, { timeZone: 'UTC', costEnabled: true });
+  const table = renderTable(rows, 'Date', { costEnabled: true });
+
+  assert.match(table, /Cost/);
+  assert.match(table, /N\/A/);
+});
+
+async function makeFixture(model = 'kimi-code/kimi-for-coding') {
   const root = join(tmpdir(), `kimiusage-p0-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   for (const [session, time, total] of [
     ['session-a', Date.UTC(2026, 0, 5, 23, 0, 0), 100],
@@ -163,7 +205,7 @@ async function makeFixture() {
         type: 'usage.record',
         usageScope: 'turn',
         time,
-        model: 'kimi-k2',
+        model,
         usage: { inputOther: total, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },
       })}\n`,
     );

@@ -1,161 +1,129 @@
-# Kimi Code Usage Reporting Design
+# Kimi Code 用量报告设计
 
-## Goal
+## 目标
 
-Evolve `kimiusage` from an early token-counting MVP into a reliable, offline
-usage and estimated-cost reporting tool for Kimi Code. The implementation will
-borrow proven reporting patterns from `ccusage` while keeping a deliberately
-narrow product boundary: Kimi Code is the primary data source, with legacy Kimi
-CLI logs retained for compatibility.
+将 `kimiusage` 从早期的 Token 统计 MVP 完善为可靠、离线的 Kimi Code 用量与费用估算工具。实现会借鉴 `ccusage` 已验证的报告模式，但严格控制产品边界：以 Kimi Code 为主要数据源，同时保留对旧版 Kimi CLI 日志的兼容。
 
-## Product Boundary
+## 产品边界
 
-- Read Kimi Code logs under `~/.kimi-code` as the primary source.
-- Continue reading legacy Kimi CLI logs under `~/.kimi`.
-- Include every model actually routed through Kimi Code, including non-Kimi
-  models such as `mcli/glm-5.2`.
-- Never read or render prompt or response content.
-- Never send usage data over the network.
-- Do not add adapters for Claude Code, Codex, OpenCode, or other agents.
-- Do not attempt to query provider account balances or billing APIs.
+- 主要读取 `~/.kimi-code` 下的 Kimi Code 日志。
+- 继续读取 `~/.kimi` 下的旧版 Kimi CLI 日志。
+- 统计所有实际通过 Kimi Code 路由的模型，包括 `mcli/glm-5.2` 等非 Kimi 模型。
+- 不读取或展示提示词、回复正文。
+- 不通过网络发送用量数据。
+- 不增加 Claude Code、Codex、OpenCode 或其他 Agent 的适配器。
+- 不查询任何厂商的账户余额或计费 API。
 
-## Approaches Considered
+## 方案对比
 
-### Minimal MVP patch
+### 最小 MVP 修补
 
-Fix turn-scoped parsing and add a small price table without changing the
-pipeline. This has the smallest diff, but leaves weak path validation, no
-deduplication, ambiguous unknown-price handling, and an unstable JSON contract.
+修正 turn 级记录解析并加入小型价格表，不改变当前处理管线。这个方案 diff 最小，但路径校验仍然较弱，也缺少去重机制、明确的未知价格处理和稳定的 JSON 契约。
 
-### Focused ccusage-style pipeline
+### 聚焦版 ccusage 管线
 
-Keep the existing dependency-free Node.js implementation and separate the
-pipeline into discovery, normalization, deduplication, pricing, aggregation,
-and rendering. This provides the required correctness without importing
-ccusage's multi-agent architecture.
+保留现有的零依赖 Node.js 实现，把处理管线拆分为日志发现、数据规范化、去重、定价、聚合和渲染。这样能满足正确性要求，又不会引入 ccusage 的多 Agent 架构。
 
-This is the selected approach.
+选择此方案。
 
-### Rust rewrite based on ccusage
+### 基于 ccusage 的 Rust 重写
 
-Extract the Kimi adapter and reporting machinery into a new Rust CLI. This
-would maximize direct reuse but would replace the current project, complicate
-packaging, and introduce more maintenance than the repository currently needs.
+从 ccusage 抽取 Kimi 适配器和报告能力，重写为 Rust CLI。这样可以最大化直接复用，但会替换当前项目、增加打包复杂度，并带来超出当前仓库需要的维护成本。
 
-## Data Pipeline
+## 数据处理管线
 
 ```text
-data roots
-  -> constrained wire-file discovery
-  -> line parsing and normalization
-  -> zero/invalid/session-scope filtering
-  -> stable deduplication
-  -> model normalization and price resolution
-  -> time/session/model aggregation
-  -> table or JSON rendering
+数据根目录
+  -> 受约束的 wire 文件发现
+  -> 逐行解析和数据规范化
+  -> 过滤零 Token、无效记录和 session 累计记录
+  -> 稳定去重
+  -> 模型规范化和价格解析
+  -> 按时间、会话、模型聚合
+  -> 表格或 JSON 渲染
 ```
 
-Each stage will accept and return plain data objects. Pricing and rendering
-will not read files directly, and parsing will not depend on CLI flags.
+各阶段均接收和返回普通数据对象。定价与渲染不直接读取文件，解析逻辑也不依赖 CLI 参数。
 
-## Discovery
+## 日志发现
 
-Default roots remain `~/.kimi-code` and `~/.kimi`, overridden by
-`KIMI_DATA_DIR` or `--data-dir`.
+默认根目录仍为 `~/.kimi-code` 和 `~/.kimi`，可由 `KIMI_DATA_DIR` 或 `--data-dir` 覆盖。
 
-Only these layouts are accepted:
+只接受以下目录结构：
 
 ```text
 ~/.kimi-code/sessions/<workspace>/<session>/agents/<agent>/wire.jsonl
 ~/.kimi/sessions/<group>/<session>/wire.jsonl
 ```
 
-Unrelated `wire.jsonl` files nested elsewhere are ignored. Root and file paths
-are sorted and deduplicated to keep output deterministic.
+忽略嵌套在其他位置的无关 `wire.jsonl`。根目录和文件路径都会排序、去重，以保证输出稳定。
 
-## Parsing and Normalization
+## 解析与规范化
 
 ### Kimi Code
 
-- Accept records whose type is `usage.record`.
-- Accept only `usageScope: "turn"`; session-scoped records are cumulative and
-  must not be added to turn totals.
-- Read `inputOther`, `output`, `inputCacheRead`, and `inputCacheCreation`.
-- Use the record timestamp and preserve workspace, session, and agent identity
-  from the path.
-- Remove the transport prefix from model IDs such as
-  `kimi-code/kimi-for-coding`, while retaining other routed model IDs.
+- 接受类型为 `usage.record` 的记录。
+- 只接受 `usageScope: "turn"`；session 级记录是累计数据，不能再叠加进 turn 总量。
+- 读取 `inputOther`、`output`、`inputCacheRead` 和 `inputCacheCreation`。
+- 使用记录中的时间戳，并从路径中保留 workspace、session 和 agent 标识。
+- 移除 `kimi-code/kimi-for-coding` 等模型 ID 的传输前缀，同时保留其他路由模型 ID。
 
-### Legacy Kimi CLI
+### 旧版 Kimi CLI
 
-- Accept `StatusUpdate` messages containing `payload.token_usage`.
-- Read the snake-case token fields and message ID when present.
-- Read the configured model from the Kimi root `config.json`; otherwise use
-  `kimi-for-coding` as the explicit fallback rather than `unknown`.
+- 接受包含 `payload.token_usage` 的 `StatusUpdate` 消息。
+- 读取 snake_case Token 字段，并在存在时读取 message ID。
+- 从 Kimi 根目录的 `config.json` 读取配置模型；读取不到时明确回退到 `kimi-for-coding`，不再使用 `unknown`。
 
-### Shared behavior
+### 公共行为
 
-- Skip malformed JSON, missing timestamps, and zero-token records.
-- Normalize invalid or negative token counts to zero.
-- Preserve cache-read and cache-creation tokens separately.
-- Deduplicate using stable source identity: session, agent, timestamp, model,
-  message ID when available, and the token fingerprint.
-- A malformed or unreadable file does not abort all reports. The CLI records a
-  diagnostic and continues; diagnostics remain off stdout so JSON stays valid.
+- 跳过损坏的 JSON、缺少时间戳的记录和零 Token 记录。
+- 将无效或负数 Token 规范化为零。
+- 分别保留缓存读取和缓存创建 Token。
+- 使用稳定的来源标识去重：session、agent、时间戳、模型、可用时的 message ID，以及 Token 指纹。
+- 单个文件损坏或不可读时不终止整份报告。CLI 记录诊断信息后继续；诊断信息不写入 stdout，保证 JSON 输出有效。
 
-## Pricing
+## 定价
 
-Pricing is estimated and local. A new pricing module will return either a
-structured cost breakdown or `null`.
+费用均为本地估算值。新增独立的 pricing 模块，返回结构化费用明细或 `null`。
 
-- `kimi-for-coding` resolves to Moonshot K2.5 before the known K2.6 transition
-  timestamp and Moonshot K2.6 at or after it.
-- Candidate lookup considers the normalized model ID and known provider-prefixed
-  aliases.
-- Configuration can provide explicit per-million-token prices for routed or
-  private models.
-- Cache creation and cache read have their own configurable rates.
-- Missing pricing returns `null`, never zero.
-- If an aggregate mixes priced and unpriced positive usage, its cost is `null`
-  rather than a misleading partial sum.
-- Reports expose unique `missingPricingModels` so incomplete totals are visible.
-- `--no-cost` disables price resolution and omits cost columns and warnings.
-- `--offline` remains accepted for compatibility; all behavior is already
-  offline and it will be documented as such.
+- `kimi-for-coding` 在已知的 K2.6 切换时间之前映射到 Moonshot K2.5，在该时间及之后映射到 Moonshot K2.6。
+- 候选匹配会考虑规范化模型 ID 和已知的厂商前缀别名。
+- 配置文件可以为路由模型或私有模型提供显式的每百万 Token 价格。
+- 缓存创建和缓存读取拥有各自独立的可配置价格。
+- 缺少价格时返回 `null`，绝不返回零。
+- 如果一个聚合结果同时包含有价格和无价格的有效用量，其费用返回 `null`，不展示可能误导用户的不完整金额。
+- 报告返回去重后的 `missingPricingModels`，明确指出费用合计不完整的原因。
+- `--no-cost` 关闭价格解析，并隐藏费用列和价格缺失警告。
+- `--offline` 为兼容性继续接受；所有行为本来就是离线的，文档会明确说明。
 
-The first implementation will include only verified Kimi pricing aliases. It
-will not silently guess prices for models such as `mcli/glm-5.2`; users can add
-those through configuration.
+首个实现只内置经过确认的 Kimi 价格别名。对于 `mcli/glm-5.2` 等模型，不会静默猜测价格；用户可以通过配置补充。
 
-## Aggregation
+## 聚合
 
-The existing commands remain:
+保留现有命令：
 
 - `daily`
 - `weekly`
 - `monthly`
 - `session`
 
-Every aggregate contains token categories, total tokens, estimated cost or
-`null`, session count, model list, and optional model breakdowns. Session rows
-also retain workspace and agent metadata when available.
+每个聚合结果包含各类 Token、Token 总数、估算费用或 `null`、会话数量、模型列表和可选的模型明细。session 行还会在存在时保留 workspace 和 agent 元数据。
 
-Date boundaries for `--since` and `--until` are interpreted in the configured
-IANA timezone. Weekly grouping continues to honor `--start-of-week`.
+`--since` 和 `--until` 的日期边界按照配置的 IANA 时区解释。周聚合继续遵守 `--start-of-week`。
 
-## Output Contracts
+## 输出契约
 
-### Table
+### 表格
 
-- Keep the current readable, dependency-free table.
-- Add a `Cost` column when cost calculation is enabled.
-- Render unknown or incomplete cost as `N/A`, not `$0.00`.
-- Preserve compact mode and model breakdown rows.
-- Print concise missing-price diagnostics to stderr after the report.
+- 保留现有易读、零依赖的表格实现。
+- 启用费用计算时增加 `Cost` 列。
+- 未知或不完整费用显示为 `N/A`，不显示 `$0.00`。
+- 保留 compact 模式和模型明细行。
+- 报告输出后，将简洁的价格缺失诊断写入 stderr。
 
 ### JSON
 
-Return a stable top-level object containing:
+返回稳定的顶层对象：
 
 ```json
 {
@@ -167,43 +135,33 @@ Return a stable top-level object containing:
 }
 ```
 
-Token values remain numbers. Cost values are numbers or `null`. Diagnostics do
-not contaminate stdout. When `--no-cost` is active, JSON keeps the stable cost
-fields as `null`, reports `costCalculation: "disabled"`, and leaves
-`missingPricingModels` empty.
+Token 值保持数字类型，费用值为数字或 `null`。诊断信息不会污染 stdout。使用 `--no-cost` 时，JSON 中稳定保留费用字段并设为 `null`，返回 `costCalculation: "disabled"`，同时将 `missingPricingModels` 保持为空数组。
 
-## Configuration
+## 配置
 
-Existing configuration precedence remains CLI over command config over default
-config. Add a `pricing` object keyed by model alias. Each entry may provide
-input, output, cache-read, and cache-creation USD-per-million rates.
+继续使用现有优先级：CLI 参数高于命令配置，命令配置高于默认配置。新增以模型别名为 key 的 `pricing` 对象。每项可配置输入、输出、缓存读取和缓存创建的每百万 Token 美元价格。
 
-Invalid price entries fail with a clear configuration error rather than being
-ignored or treated as zero.
+无效价格配置会产生清晰的配置错误，不会被忽略或当成零处理。
 
-## Validation
+## 验证
 
-Tests will cover:
+测试覆盖：
 
-- constrained discovery of modern and legacy layouts;
-- turn-scope inclusion and session-scope exclusion;
-- malformed, missing-time, negative, and zero-token records;
-- model normalization and routed non-Kimi models;
-- stable deduplication;
-- legacy model fallback and config lookup;
-- K2.5/K2.6 timestamp-based price resolution;
-- custom price overrides and missing pricing;
-- daily, weekly, monthly, and session aggregation;
-- timezone-aware inclusive date filtering;
-- compact, breakdown, cost, no-cost, and JSON rendering;
-- CLI diagnostics without stdout corruption.
+- 受约束的新版与旧版日志发现；
+- 包含 turn 记录并排除 session 累计记录；
+- 损坏、缺少时间戳、负数和零 Token 记录；
+- 模型名称规范化和非 Kimi 路由模型；
+- 稳定去重；
+- 旧版模型回退与配置读取；
+- 按时间切换 K2.5/K2.6 价格；
+- 自定义价格覆盖和价格缺失；
+- daily、weekly、monthly 和 session 聚合；
+- 根据时区执行包含边界的日期过滤；
+- compact、breakdown、cost、no-cost 和 JSON 渲染；
+- CLI 诊断信息不污染 stdout。
 
-The existing test suite must remain green. New behavior will be developed with
-focused tests before implementation changes.
+现有测试必须保持通过。新增行为先写聚焦测试，再修改实现。
 
-## Delivery Scope
+## 交付范围
 
-The implementation will modify the existing CLI, configuration, parser, path,
-summary, rendering, README, and tests, and add a pricing module. It will avoid
-unrelated refactors, third-party dependencies, network access, provider auth,
-and other-agent adapters.
+实现会修改现有 CLI、配置、解析器、路径发现、聚合、渲染、README 和测试，并新增 pricing 模块。不进行无关重构，不增加第三方依赖、网络访问、厂商鉴权或其他 Agent 的适配器。

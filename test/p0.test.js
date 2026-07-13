@@ -70,6 +70,9 @@ test('summaries include per-model breakdowns', () => {
       cacheReadTokens: 30,
       cacheCreationTokens: 40,
       totalTokens: 100,
+      costUsd: null,
+      costComplete: null,
+      missingPricingModels: [],
     },
     {
       model: 'moonshot-v1',
@@ -78,6 +81,9 @@ test('summaries include per-model breakdowns', () => {
       cacheReadTokens: 3,
       cacheCreationTokens: 4,
       totalTokens: 10,
+      costUsd: null,
+      costComplete: null,
+      missingPricingModels: [],
     },
   ]);
 });

@@ -1,5 +1,7 @@
 # kimiusage
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Local usage reports for Kimi Code sessions.
 
 `kimiusage` reads local Kimi/Kimi Code session logs and prints token usage

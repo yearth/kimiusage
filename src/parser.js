@@ -1,21 +1,56 @@
 import { readFile } from 'node:fs/promises';
-import { dirname, sep } from 'node:path';
+import { join } from 'node:path';
+
+import { metadataFromPath } from './paths.js';
 
 export async function loadUsageRecords(files) {
   const records = [];
+  const diagnostics = [];
+  const seen = new Set();
+  const legacyModels = new Map();
+
   for (const file of files) {
-    const text = await readFile(file, 'utf8');
-    const sessionId = sessionIdFromPath(file);
+    const metadata = metadataFromPath(file) ?? fallbackMetadata(file);
+    let text;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch (error) {
+      diagnostics.push({
+        file,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      continue;
+    }
+
+    let legacyModel = 'kimi-for-coding';
+    if (metadata.source === 'kimi') {
+      if (!legacyModels.has(metadata.rootDir)) {
+        legacyModels.set(metadata.rootDir, await readLegacyModel(metadata.rootDir));
+      }
+      legacyModel = legacyModels.get(metadata.rootDir);
+    }
+
     for (const line of text.split(/\r?\n/)) {
       if (line.trim().length === 0) continue;
-      const record = parseUsageLine(line, file, sessionId);
-      if (record !== null) records.push(record);
+      const record = parseUsageLine(line, file, metadata, legacyModel);
+      if (record === null) continue;
+      const key = recordKey(record);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      records.push(record);
     }
   }
-  return records.sort((a, b) => a.time - b.time);
+
+  records.sort((a, b) => a.time - b.time);
+  return { records, diagnostics };
 }
 
-export function parseUsageLine(line, file = '', sessionId = 'unknown') {
+export function parseUsageLine(
+  line,
+  file = '',
+  metadata = fallbackMetadata(file),
+  legacyModel = 'kimi-for-coding',
+) {
   let data;
   try {
     data = JSON.parse(line);
@@ -23,9 +58,15 @@ export function parseUsageLine(line, file = '', sessionId = 'unknown') {
     return null;
   }
 
-  const modernUsage = data.type === 'usage.record' ? data.usage : null;
-  const legacyUsage =
-    data.message?.type === 'StatusUpdate' ? data.message?.payload?.token_usage : null;
+  const normalizedMetadata = typeof metadata === 'string'
+    ? { ...fallbackMetadata(file), sessionId: metadata }
+    : metadata;
+  const isModern = data.type === 'usage.record';
+  if (isModern && data.usageScope !== 'turn') return null;
+
+  const modernUsage = isModern ? data.usage : null;
+  const legacyPayload = data.message?.type === 'StatusUpdate' ? data.message?.payload : null;
+  const legacyUsage = legacyPayload?.token_usage;
   const usage = modernUsage ?? legacyUsage;
   if (usage === null || typeof usage !== 'object') return null;
 
@@ -36,18 +77,23 @@ export function parseUsageLine(line, file = '', sessionId = 'unknown') {
     usage.inputCacheCreation ?? usage.input_cache_creation,
   );
   const explicitTotal = numberValue(usage.total);
-  const totalTokens =
-    explicitTotal > 0
-      ? explicitTotal
-      : inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
-  const time = timeValue(data.time ?? data.created_at);
+  const totalTokens = explicitTotal > 0
+    ? explicitTotal
+    : inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
+  if (totalTokens === 0) return null;
+
+  const time = timeValue(data.time ?? data.created_at ?? data.timestamp);
   if (time === null) return null;
 
   return {
     file,
-    sessionId,
+    source: normalizedMetadata.source,
+    workspace: normalizedMetadata.workspace,
+    sessionId: normalizedMetadata.sessionId,
+    agentId: normalizedMetadata.agentId,
     time,
-    model: typeof data.model === 'string' && data.model.length > 0 ? data.model : 'unknown',
+    model: normalizeModel(isModern ? data.model : legacyModel),
+    messageId: legacyPayload?.message_id ?? null,
     inputTokens,
     outputTokens,
     cacheReadTokens,
@@ -56,22 +102,58 @@ export function parseUsageLine(line, file = '', sessionId = 'unknown') {
   };
 }
 
-export function sessionIdFromPath(file) {
-  const parts = file.split(sep);
-  const sessionIndex = parts.findIndex((part) => part === 'sessions');
-  if (sessionIndex === -1) return dirname(file).split(sep).at(-1) ?? 'unknown';
+function fallbackMetadata(file) {
+  return {
+    source: 'unknown',
+    rootDir: '',
+    workspace: null,
+    sessionId: sessionIdFromPath(file),
+    agentId: null,
+  };
+}
 
-  const agentIndex = parts.findIndex((part, index) => index > sessionIndex && part === 'agents');
-  if (agentIndex > sessionIndex + 1) return parts[agentIndex - 1] ?? 'unknown';
-  return parts.at(-2) ?? 'unknown';
+async function readLegacyModel(rootDir) {
+  try {
+    const config = JSON.parse(await readFile(join(rootDir, 'config.json'), 'utf8'));
+    return normalizeModel(config.model);
+  } catch {
+    return 'kimi-for-coding';
+  }
+}
+
+function normalizeModel(model) {
+  if (typeof model !== 'string' || model.trim() === '') return 'kimi-for-coding';
+  return model.trim().replace(/^kimi-code\//, '');
+}
+
+function recordKey(record) {
+  return [
+    record.source,
+    record.workspace ?? '',
+    record.sessionId,
+    record.agentId ?? '',
+    record.time,
+    record.model,
+    record.messageId ?? '',
+    record.inputTokens,
+    record.outputTokens,
+    record.cacheReadTokens,
+    record.cacheCreationTokens,
+  ].join('|');
+}
+
+export function sessionIdFromPath(file) {
+  return metadataFromPath(file)?.sessionId ?? 'unknown';
 }
 
 function numberValue(value) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 function timeValue(value) {
-  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value < 1e12 ? Math.round(value * 1000) : value;
+  }
   if (typeof value === 'string' && value.length > 0) {
     const parsed = Date.parse(value);
     if (Number.isFinite(parsed)) return parsed;

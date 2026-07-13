@@ -1,5 +1,5 @@
 import { access, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 
 export function defaultDataDirs(env = process.env) {
   if (env.KIMI_DATA_DIR) {
@@ -11,12 +11,12 @@ export function defaultDataDirs(env = process.env) {
 }
 
 export async function discoverWireFiles(dataDirs) {
-  const files = [];
+  const files = new Set();
   for (const dir of dataDirs) {
     if (!(await exists(dir))) continue;
     await walk(dir, files);
   }
-  return files.sort();
+  return Array.from(files).sort();
 }
 
 async function walk(dir, files) {
@@ -31,10 +31,44 @@ async function walk(dir, files) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       await walk(path, files);
-    } else if (entry.isFile() && entry.name === 'wire.jsonl') {
-      files.push(path);
+    } else if (entry.isFile() && entry.name === 'wire.jsonl' && metadataFromPath(path)) {
+      files.add(path);
     }
   }
+}
+
+export function metadataFromPath(file) {
+  const parts = file.split(sep);
+  const sessions = parts.lastIndexOf('sessions');
+  if (sessions === -1) return null;
+
+  const rootDir = parts.slice(0, sessions).join(sep) || sep;
+  const rootName = basename(rootDir);
+  const relative = parts.slice(sessions + 1);
+  if (
+    rootName !== '.kimi' &&
+    relative.length === 5 &&
+    relative[2] === 'agents' &&
+    relative[4] === 'wire.jsonl'
+  ) {
+    return {
+      source: 'kimi-code',
+      rootDir,
+      workspace: relative[0],
+      sessionId: relative[1],
+      agentId: relative[3],
+    };
+  }
+  if (rootName !== '.kimi-code' && relative.length === 3 && relative[2] === 'wire.jsonl') {
+    return {
+      source: 'kimi',
+      rootDir,
+      workspace: relative[0],
+      sessionId: relative[1],
+      agentId: null,
+    };
+  }
+  return null;
 }
 
 async function exists(path) {

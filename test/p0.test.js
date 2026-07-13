@@ -133,6 +133,7 @@ async function makeFixture() {
       join(dir, 'wire.jsonl'),
       `${JSON.stringify({
         type: 'usage.record',
+        usageScope: 'turn',
         time,
         model: 'kimi-k2',
         usage: { inputOther: total, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },

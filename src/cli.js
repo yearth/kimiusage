@@ -19,7 +19,8 @@ export async function runCli(argv = process.argv.slice(2), env = process.env) {
 
   const dataDirs = options.dataDirs.length > 0 ? options.dataDirs : defaultDataDirs(env);
   const files = await discoverWireFiles(dataDirs);
-  const records = filterRecords(await loadUsageRecords(files), options);
+  const { records: loadedRecords } = await loadUsageRecords(files);
+  const records = filterRecords(loadedRecords, options);
   const rows = summarize(options.command, records, options);
   const output = options.json
     ? renderJson(rows)

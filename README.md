@@ -9,8 +9,8 @@ summaries directly in your terminal. It does not make network requests.
 
 - Daily, weekly, monthly, and per-session reports
 - Input, output, cache-read, and cache-creation token totals
-- Offline estimated cost for Kimi K2.5 and K2.6
-- Explicit pricing overrides for private or routed models
+- Offline estimated cost for Kimi K2.5 and K2.6, displayed in CNY by default
+- Currency-aware pricing overrides for private, regional, or routed models
 - Stable JSON output and per-model breakdowns
 - Kimi Code workspace/agent metadata
 - Legacy Kimi CLI log compatibility
@@ -69,7 +69,8 @@ You can keep repeated options in a JSON config file:
 {
   "defaults": {
     "timezone": "Asia/Shanghai",
-    "compact": true
+    "compact": true,
+    "currency": "CNY"
   },
   "commands": {
     "weekly": {
@@ -78,18 +79,32 @@ You can keep repeated options in a JSON config file:
   },
   "pricing": {
     "mcli/glm-5.2": {
+      "currency": "CNY",
       "input": 1,
       "output": 2,
       "cacheRead": 0.1,
       "cacheCreation": 1.25
     }
+  },
+  "exchangeRates": {
+    "EUR": {
+      "perUsd": 0.86,
+      "asOf": "2026-07-10",
+      "source": "manual"
+    }
   }
 }
 ```
 
-Pricing values are USD per one million tokens. CLI flags override command
-configuration, which overrides defaults. Invalid or negative pricing values
-produce a configuration error.
+The four pricing values are expressed in the entry's `currency`, per one
+million tokens. Existing entries without `currency` remain USD prices for
+backward compatibility. `exchangeRates.<CODE>.perUsd` means units of that
+currency per 1 USD; every currency used by `defaults.currency` or a pricing
+entry must have a rate.
+
+CLI flags override command configuration, which overrides defaults. Currency
+is intentionally config-only. Invalid currency codes, dates, exchange rates,
+or negative pricing values produce a configuration error.
 
 Load it explicitly:
 
@@ -124,6 +139,18 @@ model has no built-in or configured price, its row and any affected total show
 `N/A` in tables and `null` in JSON; `kimiusage` never reports an incomplete
 partial sum as if it were the full cost.
 
+Internally, all complete costs are normalized to USD and retained as `costUsd`.
+Tables and the additional JSON `cost` fields convert that value to the display
+currency. The default is CNY, using a built-in rate of 6.7745407 CNY per USD
+from the [ECB reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html),
+dated 2026-07-10. You can override CNY or add any three-letter currency in
+`exchangeRates`; for example, set `defaults.currency` to `USD` to display the
+underlying USD estimate directly.
+
+The built-in rate is an offline fallback snapshot, not a live quote. Normal
+reports never fetch exchange rates or pricing from the network. Keep rates and
+regional/provider prices current in your config when accuracy matters.
+
 Use `--no-cost` when you only need token counts. It keeps JSON cost fields
 stable as `null`, reports `costCalculation: "disabled"`, and suppresses missing
 pricing diagnostics.
@@ -131,13 +158,21 @@ pricing diagnostics.
 ## JSON Output
 
 JSON reports contain the command, timezone, rows, totals, cost-calculation
-state, and missing pricing models:
+state, display currency, exchange rate, and missing pricing models. Each row,
+model breakdown, and total retains `costUsd` and adds `cost` in the selected
+display currency:
 
 ```json
 {
   "command": "daily",
   "timezone": "Asia/Shanghai",
   "costCalculation": "enabled",
+  "displayCurrency": "CNY",
+  "exchangeRate": {
+    "perUsd": 6.7745407,
+    "asOf": "2026-07-10",
+    "source": "ECB reference rates"
+  },
   "rows": [],
   "totals": {},
   "missingPricingModels": []

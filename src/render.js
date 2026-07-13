@@ -1,12 +1,16 @@
+import { createCurrencyContext } from './currency.js';
+
 export function renderTable(rows, label = 'Date', options = {}) {
+  const currencyContext = resolveCurrencyContext(options);
   const headers = options.compact
     ? [label, 'Sessions', 'Models', 'Total']
     : [label, 'Sessions', 'Models', 'Input', 'Output', 'Cache Read', 'Cache Create', 'Total'];
-  if (options.costEnabled) headers.push('Cost');
-  const body = rows.map((row) => summaryRow(row, options));
-  if (options.breakdown) addBreakdownRows(body, rows, options);
+  if (options.costEnabled) headers.push(`Cost (${currencyContext.displayCurrency})`);
+  const renderOptions = { ...options, currencyContext };
+  const body = rows.map((row) => summaryRow(row, renderOptions));
+  if (options.breakdown) addBreakdownRows(body, rows, renderOptions);
   const total = totals(rows);
-  body.push(totalRow(total, options));
+  body.push(totalRow(total, renderOptions));
 
   const widths = headers.map((header, index) =>
     Math.max(header.length, ...body.map((row) => row[index].length)),
@@ -17,12 +21,20 @@ export function renderTable(rows, label = 'Date', options = {}) {
 }
 
 export function renderJson(rows, context = {}) {
-  const total = totals(rows);
+  const currencyContext = resolveCurrencyContext(context);
+  const total = withDisplayCost(totals(rows), currencyContext);
+  const displayRows = rows.map((row) => ({
+    ...withDisplayCost(row, currencyContext),
+    modelBreakdowns: row.modelBreakdowns.map((item) =>
+      withDisplayCost(item, currencyContext)),
+  }));
   return JSON.stringify({
     command: context.command ?? 'daily',
     timezone: context.timezone ?? 'UTC',
     costCalculation: context.costEnabled === false ? 'disabled' : 'enabled',
-    rows,
+    displayCurrency: currencyContext.displayCurrency,
+    exchangeRate: currencyContext.exchangeRate,
+    rows: displayRows,
     totals: total,
     missingPricingModels: context.costEnabled === false ? [] : total.missingPricingModels,
   }, null, 2);
@@ -93,7 +105,7 @@ function summaryRow(row, options) {
       formatNumber(row.totalTokens),
     ];
   }
-  if (options.costEnabled) cells.push(formatCost(row.costUsd));
+  if (options.costEnabled) cells.push(formatCost(row.costUsd, options.currencyContext));
   return cells;
 }
 
@@ -123,7 +135,7 @@ function breakdownRow(item, options) {
       formatNumber(item.totalTokens),
     ];
   }
-  if (options.costEnabled) cells.push(formatCost(item.costUsd));
+  if (options.costEnabled) cells.push(formatCost(item.costUsd, options.currencyContext));
   return cells;
 }
 
@@ -148,14 +160,29 @@ function totalRow(total, options) {
       formatNumber(total.totalTokens),
     ];
   }
-  if (options.costEnabled) cells.push(formatCost(total.costUsd));
+  if (options.costEnabled) cells.push(formatCost(total.costUsd, options.currencyContext));
   return cells;
 }
 
-function formatCost(value) {
+function formatCost(value, currencyContext) {
   if (value === null || value === undefined) return 'N/A';
-  const digits = value >= 1 ? 2 : value >= 0.1 ? 3 : 6;
-  return `$${value.toFixed(digits)}`;
+  return currencyContext.formatUsd(value);
+}
+
+function withDisplayCost(item, currencyContext) {
+  return {
+    ...item,
+    cost: item.costUsd === null || item.costUsd === undefined
+      ? null
+      : precise(currencyContext.fromUsd(item.costUsd)),
+  };
+}
+
+function resolveCurrencyContext(options) {
+  return options.currencyContext ?? createCurrencyContext({
+    displayCurrency: options.currency,
+    exchangeRates: options.exchangeRates,
+  });
 }
 
 function precise(value) {

@@ -1,3 +1,4 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -72,4 +73,37 @@ test('rejects invalid CLI input', () => {
     () => parseArgs(['daily', '--timezone', '--json']),
     /Missing value for --timezone/,
   );
+});
+
+test('uses USD display currency from config', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'kimiusage-usd-'));
+  const dataDir = join(
+    root,
+    '.kimi-code',
+    'sessions',
+    'workspace-a',
+    'session-a',
+    'agents',
+    'main',
+  );
+  const configPath = join(root, 'config.json');
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(configPath, JSON.stringify({
+    defaults: {
+      currency: 'USD',
+      dataDirs: [join(root, '.kimi-code')],
+    },
+  }));
+  await writeFile(join(dataDir, 'wire.jsonl'), `${JSON.stringify({
+    type: 'usage.record',
+    usageScope: 'turn',
+    time: Date.UTC(2026, 0, 1),
+    model: 'kimi-code/kimi-for-coding',
+    usage: { inputOther: 100, output: 0, inputCacheRead: 0, inputCacheCreation: 0 },
+  })}\n`);
+
+  const result = await runCli(['daily', '--config', configPath], { HOME: root });
+
+  assert.match(result.stdout, /Cost \(USD\)/);
+  assert.match(result.stdout, /\$0\.000060/);
 });

@@ -9,11 +9,16 @@ import {
 } from './summary.js';
 import { renderJson, renderTable } from './render.js';
 import { applyConfig, loadConfig } from './config.js';
+import { createCurrencyContext } from './currency.js';
 import { priceRecord } from './pricing.js';
 
 export async function runCli(argv = process.argv.slice(2), env = process.env) {
   const parsedOptions = parseArgs(argv);
   const options = applyConfig(parsedOptions, await loadConfig(parsedOptions.configPath, env));
+  const currencyContext = createCurrencyContext({
+    displayCurrency: options.currency,
+    exchangeRates: options.exchangeRates,
+  });
   if (options.help) {
     return { stdout: usage(), stderr: '' };
   }
@@ -23,7 +28,9 @@ export async function runCli(argv = process.argv.slice(2), env = process.env) {
   const { records: loadedRecords, diagnostics } = await loadUsageRecords(files);
   const pricedRecords = loadedRecords.map((record) => ({
     ...record,
-    cost: options.costEnabled ? priceRecord(record, options.pricing) : null,
+    cost: options.costEnabled
+      ? priceRecord(record, options.pricing, currencyContext)
+      : null,
   }));
   const records = filterRecords(pricedRecords, options);
   const rows = summarize(options.command, records, options);
@@ -31,10 +38,11 @@ export async function runCli(argv = process.argv.slice(2), env = process.env) {
     command: options.command,
     timezone: options.timeZone,
     costEnabled: options.costEnabled,
+    currencyContext,
   };
   const output = options.json
     ? renderJson(rows, context)
-    : renderTable(rows, labelFor(options.command), options);
+    : renderTable(rows, labelFor(options.command), { ...options, currencyContext });
   return {
     stdout: `${output}\n`,
     stderr: renderDiagnostics(diagnostics, rows, options),

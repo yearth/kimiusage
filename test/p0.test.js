@@ -180,7 +180,9 @@ test('CLI disables pricing cleanly with --no-cost', async () => {
 
   assert.equal(report.costCalculation, 'disabled');
   assert.equal(report.rows[0].costUsd, null);
+  assert.equal(report.rows[0].cost, null);
   assert.equal(report.totals.costUsd, null);
+  assert.equal(report.totals.cost, null);
   assert.deepEqual(report.missingPricingModels, []);
   assert.equal(result.stderr, '');
 });
@@ -191,6 +193,34 @@ test('table shows Cost and N/A for incomplete pricing', () => {
 
   assert.match(table, /Cost/);
   assert.match(table, /N\/A/);
+});
+
+test('CLI defaults to CNY while retaining USD JSON costs', async () => {
+  const root = await makeFixture();
+  const dataDir = join(root, '.kimi-code');
+  const table = await runCli(['daily', '--data-dir', dataDir], { HOME: root });
+
+  assert.match(table.stdout, /Cost \(CNY\)/);
+  assert.match(table.stdout, /¥/);
+
+  const result = await runCli(['daily', '--json', '--data-dir', dataDir], { HOME: root });
+  const report = JSON.parse(result.stdout);
+  const firstRow = report.rows[0];
+
+  assert.equal(report.displayCurrency, 'CNY');
+  assert.equal(report.exchangeRate.perUsd, 6.7745407);
+  assert.equal(
+    firstRow.cost,
+    Number((firstRow.costUsd * 6.7745407).toPrecision(15)),
+  );
+  assert.equal(
+    firstRow.modelBreakdowns[0].cost,
+    Number((firstRow.modelBreakdowns[0].costUsd * 6.7745407).toPrecision(15)),
+  );
+  assert.equal(
+    report.totals.cost,
+    Number((report.totals.costUsd * 6.7745407).toPrecision(15)),
+  );
 });
 
 async function makeFixture(model = 'kimi-code/kimi-for-coding') {

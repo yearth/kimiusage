@@ -63,7 +63,7 @@ Token 用量
 
 所有汇率统一定义为“1 USD 对应多少目标币种”，字段名为 `perUsd`。USD 固定为 `perUsd: 1`，不得配置为其他数值。
 
-默认显示币种为 `CNY`。内置 CNY 兜底汇率使用欧洲央行 2026-07-10 参考汇率交叉计算：EUR/USD 为 1.1430、EUR/CNY 为 7.7433，因此 `CNY per USD = 7.7433 / 1.1430 = 6.7745407`。内置元数据记录来源 URL `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml` 和日期 `2026-07-10`。
+默认显示币种为 `CNY`。内置 CNY 兜底汇率使用欧洲央行 2026-07-10 参考汇率交叉计算：EUR/USD 为 1.1430、EUR/CNY 为 7.7433，因此 `CNY per USD = 7.7433 / 1.1430 = 6.7745407`。内置元数据记录来源 `ECB reference rates` 和日期 `2026-07-10`，README 记录来源 URL `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml`。
 
 货币代码输入大小写不敏感，内部统一转为大写。未知货币、非正数或非有限汇率、非法日期和被错误覆盖的 USD 汇率均产生明确配置错误。
 

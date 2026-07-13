@@ -1,15 +1,19 @@
+import { createCurrencyContext, normalizeCurrencyCode } from './currency.js';
+
 export const K2_6_CUTOFF_MS = Date.parse('2026-04-20T15:28:10.072Z');
 
 const TOKENS_PER_MILLION = 1_000_000;
 const PRICING_FIELDS = ['input', 'output', 'cacheRead', 'cacheCreation'];
 const BUILTIN_PRICING = {
   'moonshot/kimi-k2.5': {
+    currency: 'USD',
     input: 0.6,
     output: 3,
     cacheRead: 0.1,
     cacheCreation: 0.75,
   },
   'moonshot/kimi-k2.6': {
+    currency: 'USD',
     input: 0.95,
     output: 4,
     cacheRead: 0.16,
@@ -24,18 +28,32 @@ export function resolvePricingModel(model, time) {
   return model;
 }
 
-export function priceRecord(record, overrides = {}) {
+export function priceRecord(
+  record,
+  overrides = {},
+  currencyContext = createCurrencyContext({ displayCurrency: 'USD' }),
+) {
   if (record.extraTokens > 0) return null;
 
   const resolved = findPricing(record.model, record.time, overrides);
   if (!resolved) return null;
 
-  const inputUsd = calculate(record.inputTokens, resolved.pricing.input);
-  const outputUsd = calculate(record.outputTokens, resolved.pricing.output);
-  const cacheReadUsd = calculate(record.cacheReadTokens, resolved.pricing.cacheRead);
-  const cacheCreationUsd = calculate(
-    record.cacheCreationTokens,
-    resolved.pricing.cacheCreation,
+  const pricingCurrency = normalizeCurrencyCode(resolved.pricing.currency ?? 'USD');
+  const inputUsd = currencyContext.toUsd(
+    calculate(record.inputTokens, resolved.pricing.input),
+    pricingCurrency,
+  );
+  const outputUsd = currencyContext.toUsd(
+    calculate(record.outputTokens, resolved.pricing.output),
+    pricingCurrency,
+  );
+  const cacheReadUsd = currencyContext.toUsd(
+    calculate(record.cacheReadTokens, resolved.pricing.cacheRead),
+    pricingCurrency,
+  );
+  const cacheCreationUsd = currencyContext.toUsd(
+    calculate(record.cacheCreationTokens, resolved.pricing.cacheCreation),
+    pricingCurrency,
   );
   return {
     totalUsd: precise(inputUsd + outputUsd + cacheReadUsd + cacheCreationUsd),
@@ -44,6 +62,7 @@ export function priceRecord(record, overrides = {}) {
     cacheReadUsd,
     cacheCreationUsd,
     pricingModel: resolved.model,
+    pricingCurrency,
   };
 }
 
@@ -65,6 +84,11 @@ export function validatePricingConfig(value) {
         throw new Error(`Invalid pricing for ${model}: ${field}`);
       }
       entry[field] = amount;
+    }
+    try {
+      entry.currency = normalizeCurrencyCode(pricing.currency ?? 'USD');
+    } catch {
+      throw new Error(`Invalid pricing for ${model}: currency`);
     }
     validated[model] = entry;
   }

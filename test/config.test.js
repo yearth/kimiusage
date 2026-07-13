@@ -70,3 +70,48 @@ test('applies defaults and command config without overriding explicit CLI flags'
     dataDirs: ['/tmp/a', '/tmp/b'],
   });
 });
+
+test('loads display currency, exchange rates, and pricing currency', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'kimiusage-currency-config-'));
+  const file = join(home, 'config.json');
+  await writeFile(file, JSON.stringify({
+    defaults: { currency: 'eur' },
+    exchangeRates: {
+      EUR: { perUsd: 0.86, asOf: '2026-07-13' },
+    },
+    pricing: {
+      routed: {
+        currency: 'eur',
+        input: 1,
+        output: 2,
+        cacheRead: 0.1,
+        cacheCreation: 1.25,
+      },
+    },
+  }));
+
+  const config = await loadConfig(file);
+  const options = applyConfig(parseArgs(['daily']), config);
+
+  assert.equal(options.currency, 'EUR');
+  assert.equal(options.exchangeRates.EUR.perUsd, 0.86);
+  assert.equal(options.pricing.routed.currency, 'EUR');
+});
+
+test('rejects pricing currencies without an exchange rate', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'kimiusage-missing-rate-'));
+  const file = join(home, 'config.json');
+  await writeFile(file, JSON.stringify({
+    pricing: {
+      routed: {
+        currency: 'GBP',
+        input: 1,
+        output: 2,
+        cacheRead: 0.1,
+        cacheCreation: 1.25,
+      },
+    },
+  }));
+
+  await assert.rejects(() => loadConfig(file), /Missing exchange rate for GBP/);
+});

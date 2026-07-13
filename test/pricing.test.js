@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { createCurrencyContext } from '../src/currency.js';
 import {
   K2_6_CUTOFF_MS,
   priceRecord,
@@ -40,6 +41,7 @@ test('calculates K2.6 token category costs', () => {
     cacheReadUsd: 0.00000016,
     cacheCreationUsd: 0.0000011875,
     pricingModel: 'moonshot/kimi-k2.6',
+    pricingCurrency: 'USD',
   });
 });
 
@@ -64,6 +66,29 @@ test('does not report a complete price for unclassified total tokens', () => {
   assert.equal(priceRecord(usageRecord({ extraTokens: 1 }), {}), null);
 });
 
+test('normalizes configured CNY pricing back to USD', () => {
+  const context = createCurrencyContext();
+  const cost = priceRecord(usageRecord({
+    inputTokens: 1,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 1,
+  }), {
+    'kimi-for-coding': {
+      currency: 'CNY',
+      input: 6.7745407,
+      output: 0,
+      cacheRead: 0,
+      cacheCreation: 0,
+    },
+  }, context);
+
+  assert.equal(cost.inputUsd, 0.000001);
+  assert.equal(cost.totalUsd, 0.000001);
+  assert.equal(cost.pricingCurrency, 'CNY');
+});
+
 test('validates all pricing fields', () => {
   const valid = {
     'mcli/glm-5.2': {
@@ -74,7 +99,9 @@ test('validates all pricing fields', () => {
     },
   };
 
-  assert.deepEqual(validatePricingConfig(valid), valid);
+  assert.deepEqual(validatePricingConfig(valid), {
+    'mcli/glm-5.2': { ...valid['mcli/glm-5.2'], currency: 'USD' },
+  });
   assert.throws(
     () => validatePricingConfig({ broken: { input: -1 } }),
     /Invalid pricing for broken: input/,
@@ -82,5 +109,9 @@ test('validates all pricing fields', () => {
   assert.throws(
     () => validatePricingConfig({ broken: { input: 1, output: 2 } }),
     /Invalid pricing for broken: cacheRead/,
+  );
+  assert.throws(
+    () => validatePricingConfig({ broken: { ...valid['mcli/glm-5.2'], currency: 'CN' } }),
+    /Invalid pricing for broken: currency/,
   );
 });

@@ -143,7 +143,9 @@ test('configuration validates and exposes pricing overrides', async () => {
 
   const options = applyConfig(parseArgs(['daily']), await loadConfig(configPath));
 
-  assert.deepEqual(options.pricing, pricing);
+  assert.deepEqual(options.pricing, {
+    'mcli/glm-5.2': { ...pricing['mcli/glm-5.2'], currency: 'USD' },
+  });
 
   await writeFile(configPath, JSON.stringify({ pricing: { broken: { input: -1 } } }));
   await assert.rejects(() => loadConfig(configPath), /Invalid pricing for broken: input/);

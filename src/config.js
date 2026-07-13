@@ -1,6 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import {
+  DEFAULT_CURRENCY,
+  createCurrencyContext,
+  normalizeCurrencyCode,
+  validateExchangeRates,
+} from './currency.js';
 import { validatePricingConfig } from './pricing.js';
 
 export async function loadConfig(path, env = process.env) {
@@ -12,7 +18,17 @@ export async function loadConfig(path, env = process.env) {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`Invalid config file: ${configPath}`);
   }
+  parsed.exchangeRates = validateExchangeRates(parsed.exchangeRates);
   parsed.pricing = validatePricingConfig(parsed.pricing);
+  const currencyContext = createCurrencyContext({
+    displayCurrency: parsed.defaults?.currency ?? DEFAULT_CURRENCY,
+    exchangeRates: parsed.exchangeRates,
+  });
+  for (const pricing of Object.values(parsed.pricing)) {
+    if (!currencyContext.hasCurrency(pricing.currency)) {
+      throw new Error(`Missing exchange rate for ${pricing.currency}`);
+    }
+  }
   return parsed;
 }
 
@@ -39,6 +55,10 @@ export function applyConfig(options, config) {
   const commandConfig = config.commands?.[options.command] ?? {};
   return {
     ...mergeOptions(mergeOptions(options, config.defaults ?? {}), commandConfig),
+    currency: normalizeCurrencyCode(
+      config.defaults?.currency ?? options.currency ?? DEFAULT_CURRENCY,
+    ),
+    exchangeRates: config.exchangeRates ?? {},
     pricing: config.pricing ?? {},
   };
 }

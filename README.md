@@ -5,10 +5,15 @@ Local usage reports for Kimi Code sessions.
 `kimiusage` reads local Kimi/Kimi Code session logs and prints token usage
 summaries directly in your terminal. It does not make network requests.
 
-## Status
+## Features
 
-Early MVP. It currently reports token counts only; cost estimation is
-intentionally not implemented yet.
+- Daily, weekly, monthly, and per-session reports
+- Input, output, cache-read, and cache-creation token totals
+- Offline estimated cost for Kimi K2.5 and K2.6
+- Explicit pricing overrides for private or routed models
+- Stable JSON output and per-model breakdowns
+- Kimi Code workspace/agent metadata
+- Legacy Kimi CLI log compatibility
 
 ## Usage
 
@@ -53,7 +58,8 @@ KIMI_DATA_DIR=~/.kimi-code kimiusage session
 - `--json` - print structured JSON.
 - `--breakdown` - show per-model breakdown rows.
 - `--compact` - use a compact table layout for narrow terminals.
-- `--no-cost` / `--offline` - accepted for compatibility; cost estimation is not implemented yet.
+- `--no-cost` - disable estimated cost calculation.
+- `--offline` - accepted for compatibility; `kimiusage` is always offline.
 
 ## Configuration
 
@@ -69,9 +75,21 @@ You can keep repeated options in a JSON config file:
     "weekly": {
       "startOfWeek": "monday"
     }
+  },
+  "pricing": {
+    "mcli/glm-5.2": {
+      "input": 1,
+      "output": 2,
+      "cacheRead": 0.1,
+      "cacheCreation": 1.25
+    }
   }
 }
 ```
+
+Pricing values are USD per one million tokens. CLI flags override command
+configuration, which overrides defaults. Invalid or negative pricing values
+produce a configuration error.
 
 Load it explicitly:
 
@@ -87,15 +105,50 @@ Without `--config`, `kimiusage` looks for:
 
 ## Data Sources
 
-The MVP supports:
+Supported inputs:
 
 - Kimi Code `usage.record` events in `~/.kimi-code/sessions/**/agents/*/wire.jsonl`
 - Legacy Kimi `StatusUpdate.payload.token_usage` events in `~/.kimi/sessions/**/wire.jsonl`
 
+For Kimi Code, only turn-scoped `usage.record` entries are counted. Session
+records are cumulative totals and are intentionally skipped to prevent double
+counting. Malformed and zero-token records are ignored, and duplicate usage
+records are counted once.
+
+## Cost Estimation
+
+Cost calculation is local and is always an estimate. The built-in pricing
+snapshot covers `kimi-for-coding`, mapped by timestamp to Moonshot K2.5 or
+K2.6. Models routed through Kimi Code retain their actual model IDs. If a
+model has no built-in or configured price, its row and any affected total show
+`N/A` in tables and `null` in JSON; `kimiusage` never reports an incomplete
+partial sum as if it were the full cost.
+
+Use `--no-cost` when you only need token counts. It keeps JSON cost fields
+stable as `null`, reports `costCalculation: "disabled"`, and suppresses missing
+pricing diagnostics.
+
+## JSON Output
+
+JSON reports contain the command, timezone, rows, totals, cost-calculation
+state, and missing pricing models:
+
+```json
+{
+  "command": "daily",
+  "timezone": "Asia/Shanghai",
+  "costCalculation": "enabled",
+  "rows": [],
+  "totals": {},
+  "missingPricingModels": []
+}
+```
+
 ## Privacy
 
-`kimiusage` only reads local session log files. It does not print prompt or
-message content; it only aggregates usage fields.
+`kimiusage` only reads local session log files and optional local configuration.
+It does not print prompt or message content, access provider credentials, query
+billing APIs, or make network requests.
 
 ## License
 

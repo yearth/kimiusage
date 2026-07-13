@@ -25,6 +25,8 @@ export function resolvePricingModel(model, time) {
 }
 
 export function priceRecord(record, overrides = {}) {
+  if (record.extraTokens > 0) return null;
+
   const resolved = findPricing(record.model, record.time, overrides);
   if (!resolved) return null;
 

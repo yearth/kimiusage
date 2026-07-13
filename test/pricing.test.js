@@ -60,6 +60,10 @@ test('uses explicit pricing for routed models and returns null when unknown', ()
   );
 });
 
+test('does not report a complete price for unclassified total tokens', () => {
+  assert.equal(priceRecord(usageRecord({ extraTokens: 1 }), {}), null);
+});
+
 test('validates all pricing fields', () => {
   const valid = {
     'mcli/glm-5.2': {

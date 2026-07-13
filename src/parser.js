@@ -71,15 +71,26 @@ export function parseUsageLine(
   if (usage === null || typeof usage !== 'object') return null;
 
   const inputTokens = numberValue(usage.inputOther ?? usage.input_other);
-  const outputTokens = numberValue(usage.output);
+  let outputTokens = numberValue(usage.output);
   const cacheReadTokens = numberValue(usage.inputCacheRead ?? usage.input_cache_read);
   const cacheCreationTokens = numberValue(
     usage.inputCacheCreation ?? usage.input_cache_creation,
   );
   const explicitTotal = numberValue(usage.total);
-  const totalTokens = explicitTotal > 0
-    ? explicitTotal
-    : inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
+  const categorizedTokens = inputTokens
+    + outputTokens
+    + cacheReadTokens
+    + cacheCreationTokens;
+  const missingTokens = Math.max(explicitTotal - categorizedTokens, 0);
+  let extraTokens = 0;
+  if (missingTokens > 0) {
+    if (outputTokens === 0) {
+      outputTokens = missingTokens;
+    } else {
+      extraTokens = missingTokens;
+    }
+  }
+  const totalTokens = categorizedTokens + missingTokens;
   if (totalTokens === 0) return null;
 
   const time = timeValue(data.time ?? data.created_at ?? data.timestamp);
@@ -98,6 +109,7 @@ export function parseUsageLine(
     outputTokens,
     cacheReadTokens,
     cacheCreationTokens,
+    extraTokens,
     totalTokens,
   };
 }
@@ -139,6 +151,7 @@ function recordKey(record) {
     record.outputTokens,
     record.cacheReadTokens,
     record.cacheCreationTokens,
+    record.extraTokens,
   ].join('|');
 }
 

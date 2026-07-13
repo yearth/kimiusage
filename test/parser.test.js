@@ -267,3 +267,43 @@ test('normalizes negative token fields to zero and skips zero-token records', ()
   assert.equal(negative.outputTokens, 2);
   assert.equal(zero, null);
 });
+
+test('uses legacy total tokens as a safe fallback for missing token categories', () => {
+  const legacyLine = (tokenUsage) => JSON.stringify({
+    message: {
+      type: 'StatusUpdate',
+      payload: { token_usage: tokenUsage },
+    },
+    timestamp: 1_800_000_000,
+  });
+
+  const totalOnly = parseUsageLine(legacyLine({ total: 1000 }));
+  const missingOutput = parseUsageLine(legacyLine({ input_other: 100, total: 150 }));
+  const unclassified = parseUsageLine(legacyLine({
+    input_other: 100,
+    output: 20,
+    total: 150,
+  }));
+  const smallerTotal = parseUsageLine(legacyLine({
+    input_other: 100,
+    output: 20,
+    total: 90,
+  }));
+
+  assert.deepEqual(
+    [totalOnly.outputTokens, totalOnly.extraTokens, totalOnly.totalTokens],
+    [1000, 0, 1000],
+  );
+  assert.deepEqual(
+    [missingOutput.outputTokens, missingOutput.extraTokens, missingOutput.totalTokens],
+    [50, 0, 150],
+  );
+  assert.deepEqual(
+    [unclassified.outputTokens, unclassified.extraTokens, unclassified.totalTokens],
+    [20, 30, 150],
+  );
+  assert.deepEqual(
+    [smallerTotal.outputTokens, smallerTotal.extraTokens, smallerTotal.totalTokens],
+    [20, 0, 120],
+  );
+});
